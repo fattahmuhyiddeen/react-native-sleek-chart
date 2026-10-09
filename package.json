@@ -1,0 +1,24 @@
+{
+  "name": "react-native-sleek-chart",
+  "version": "0.0.1",
+  "description": "A sleek chart component for React Native",
+  "main": "index.js",
+  "scripts": {
+    "pub": "npm publish --access=public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fattahmuhyiddeen/react-native-sleek-chart.git"
+  },
+  "keywords": [
+    "chart",
+    "sleek",
+    "react-native"
+  ],
+  "author": "Fattah Muhyiddeen <fattahmuhyiddeen@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/fattahmuhyiddeen/react-native-sleek-chart/issues"
+  },
+  "homepage": "https://github.com/fattahmuhyiddeen/react-native-sleek-chart#readme"
+}
