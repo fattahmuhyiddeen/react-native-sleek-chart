@@ -1,302 +1,244 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
+import { View } from 'react-native';
+import Svg, { Path, Text as SvgText, Circle, Line, Rect, G } from 'react-native-svg';
 
-const catmullRom = (p0, p1, p2, p3, t) => {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (
-    (2 * p1) +
-    (-p0 + p2) * t +
-    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-    (-p0 + 3 * p1 - 3 * p2 + p3) * t3
-  );
+// Helper functions to calculate smooth bezier curves
+const lineProperties = (pointA, pointB) => {
+  const lengthX = pointB.x - pointA.x;
+  const lengthY = pointB.y - pointA.y;
+  return {
+    length: Math.sqrt(Math.pow(lengthX, 2) + Math.pow(lengthY, 2)),
+    angle: Math.atan2(lengthY, lengthX),
+  };
 };
 
-const generateSmoothPoints = (data, stepsPerSegment = 15) => {
-  const smoothData = [];
-  for (let i = 0; i < data.length - 1; i++) {
-    const p0 = data[Math.max(i - 1, 0)];
-    const p1 = data[i];
-    const p2 = data[i + 1];
-    const p3 = data[Math.min(i + 2, data.length - 1)];
-
-    for (let t = 0; t < 1; t += 1 / stepsPerSegment) {
-      smoothData.push(catmullRom(p0, p1, p2, p3, t));
-    }
-  }
-  smoothData.push(data[data.length - 1]);
-  return smoothData;
+const controlPoint = (current, previous, next, reverse) => {
+  const p = previous || current;
+  const n = next || current;
+  const smoothing = 0.2;
+  const o = lineProperties(p, n);
+  const angle = o.angle + (reverse ? Math.PI : 0);
+  const length = o.length * smoothing;
+  return {
+    x: current.x + Math.cos(angle) * length,
+    y: current.y + Math.sin(angle) * length,
+  };
 };
 
-const LineChart = ({
-  data = [],
-  xAxis = [],
-  dataLabels = [],
-  unit = '',
-  showDots = false,
-  dotSize = 8,
-  dotColor = '#007AFF'
+const createSmoothPath = (points) => {
+  return points.reduce((acc, point, i, a) => {
+    if (i === 0) return `M ${point.x},${point.y}`;
+    const cps = controlPoint(a[i - 1], a[i - 2], point);
+    const cpe = controlPoint(point, a[i - 1], a[i + 1], true);
+    return `${acc} C ${cps.x},${cps.y} ${cpe.x},${cpe.y} ${point.x},${point.y}`;
+  }, '');
+};
+
+const SmoothLineChart = ({ 
+  data, 
+  xAxisLabels, 
+  showDots = false, 
+  width = 350, 
+  height = 150 
 }) => {
-  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [selectedIndex, setSelectedIndex] = useState(null);
 
-  const minVal = Math.floor(Math.min(...data));
-  const maxVal = Math.ceil(Math.max(...data));
-  const yRange = maxVal - minVal || 1;
+  // Reduced top padding since the tooltip is no longer fixed at the top
+  const padding = { top: 40, bottom: 40, left: 40, right: 20 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
 
-  const yAxisLabels = [];
-  for (let i = maxVal; i >= minVal; i--) {
-    yAxisLabels.push(i);
-  }
+  // Auto-generate Y-Axis based on data
+  const dataMin = Math.floor(Math.min(...data));
+  const dataMax = Math.ceil(Math.max(...data));
+  const yRange = dataMax - dataMin || 1; 
 
-  const getSmoothX = (index, smoothDataLength) => (index / (smoothDataLength - 1)) * dimensions.width;
-  const getRawX = (index) => (index / (data.length - 1)) * dimensions.width;
-  const getY = (val) => dimensions.height - ((val - minVal) / yRange) * dimensions.height;
+  const yAxisLabels = [dataMax, Math.round((dataMax + dataMin) / 2), dataMin];
 
-  const handleOutsidePress = () => {
-    setSelectedIndex(null);
-  };
+  // Map data to SVG coordinates
+  const points = data.map((value, index) => {
+    const x = padding.left + (index / (data.length - 1)) * chartWidth;
+    const y = padding.top + chartHeight - ((value - dataMin) / yRange) * chartHeight;
+    return { x, y, value };
+  });
 
-  const renderLines = () => {
-    if (!dimensions.width || !dimensions.height || data.length === 0) return null;
+  const path = createSmoothPath(points);
 
-    const smoothData = generateSmoothPoints(data);
-    const segments = [];
+  const segmentWidth = chartWidth / Math.max(1, data.length - 1);
 
-    for (let i = 0; i < smoothData.length - 1; i++) {
-      const x1 = getSmoothX(i, smoothData.length);
-      const y1 = getY(smoothData[i]);
-      const x2 = getSmoothX(i + 1, smoothData.length);
-      const y2 = getY(smoothData[i + 1]);
-
-      const dx = x2 - x1;
-      const dy = y2 - y1;
-      const distance = Math.sqrt(dx * dx + dy * dy) + 1.5;
-      const angle = Math.atan2(dy, dx);
-
-      const cx = (x1 + x2) / 2;
-      const cy = (y1 + y2) / 2;
-
-      segments.push(
-        <View
-          key={`segment-${i}`}
-          style={[
-            styles.lineSegment,
-            {
-              left: cx - distance / 2,
-              top: cy - 1,
-              width: distance,
-              transform: [{ rotate: `${angle}rad` }],
-            },
-          ]}
-        />
-      );
-    }
-    return segments;
-  };
-
-  const renderDots = () => {
-    if (!dimensions.width || !dimensions.height || data.length === 0) return null;
-
-    return data.map((val, index) => {
-      const x = getRawX(index);
-      const y = getY(val);
-      const isSelected = selectedIndex === index;
-      const hitAreaSize = Math.max(dotSize * 3, 30);
-
-      return (
-        <TouchableOpacity
-          key={`dot-${index}`}
-          activeOpacity={0.8}
-          onPress={() => setSelectedIndex(index)}
-          style={{
-            position: 'absolute',
-            left: x - hitAreaSize / 2,
-            top: y - hitAreaSize / 2,
-            width: hitAreaSize,
-            height: hitAreaSize,
-            justifyContent: 'center',
-            alignItems: 'center',
-            zIndex: isSelected ? 10 : 5,
-          }}
-        >
-          {showDots && !isSelected && (
-            <View
-              style={{
-                width: dotSize,
-                height: dotSize,
-                borderRadius: dotSize / 2,
-                backgroundColor: dotColor,
-              }}
-            />
-          )}
-
-          {isSelected && (
-            <View
-              style={{
-                width: dotSize * 1.5,
-                height: dotSize * 1.5,
-                borderRadius: (dotSize * 1.5) / 2,
-                backgroundColor: '#FFF',
-                borderWidth: 2,
-                borderColor: '#000',
-              }}
-            />
-          )}
-        </TouchableOpacity>
-      );
-    });
-  };
-
+  // Calculate Tooltip Boundaries
   const renderTooltip = () => {
-    if (selectedIndex === null || !dimensions.width || !dimensions.height) return null;
+    if (selectedIndex === null) return null;
 
-    const x = getRawX(selectedIndex);
-    const y = getY(data[selectedIndex]);
-    const val = data[selectedIndex];
-    const dateLabel = dataLabels[selectedIndex] || '';
+    const point = points[selectedIndex];
+    const TOOLTIP_WIDTH = 100;
+    const TOOLTIP_HEIGHT = 44;
+    const MARGIN = 10;
+    
+    // Auto-aware Y position: default above point, flip below if it hits top edge
+    let tooltipY = point.y - TOOLTIP_HEIGHT - 12;
+    if (tooltipY < MARGIN) {
+      tooltipY = point.y + 12;
+    }
 
-    const tooltipWidth = 100;
-    let tooltipLeft = x - tooltipWidth / 2;
-    if (tooltipLeft < 0) tooltipLeft = 0;
-    if (tooltipLeft + tooltipWidth > dimensions.width) tooltipLeft = dimensions.width - tooltipWidth;
+    // Auto-aware X position: center on point, constrain to SVG edges
+    let tooltipX = point.x - (TOOLTIP_WIDTH / 2);
+    if (tooltipX < MARGIN) {
+      tooltipX = MARGIN; // Snap to left edge
+    } else if (tooltipX + TOOLTIP_WIDTH > width - MARGIN) {
+      tooltipX = width - TOOLTIP_WIDTH - MARGIN; // Snap to right edge
+    }
 
-    return (
-      <View style={[styles.tooltipContainer, { left: tooltipLeft, top: y - 60 }]}>
-        <View style={styles.tooltipBox}>
-          <Text style={styles.tooltipValue}>{val} {unit}</Text>
-          {dateLabel ? <Text style={styles.tooltipDate}>{dateLabel}</Text> : null}
-        </View>
-      </View>
-    );
-  };
-
-  const renderVerticalLine = () => {
-    if (selectedIndex === null || !dimensions.width || !dimensions.height) return null;
-    const x = getRawX(selectedIndex);
+    // Dynamic text centering based on shifted tooltip box
+    const textCenterX = tooltipX + (TOOLTIP_WIDTH / 2);
 
     return (
-      <View
-        style={[
-          styles.verticalLine,
-          {
-            left: x,
-            height: dimensions.height + 20,
-            top: -20,
-          }
-        ]}
-      />
+      <G pointerEvents="none">
+        {/* Vertical Indicator Line */}
+        <Line
+          x1={point.x}
+          y1={MARGIN} 
+          x2={point.x}
+          y2={height - padding.bottom} 
+          stroke="#000"
+          strokeWidth="1"
+        />
+
+        {/* Tooltip Background */}
+        <Rect
+          x={tooltipX}
+          y={tooltipY}
+          width={TOOLTIP_WIDTH}
+          height={TOOLTIP_HEIGHT}
+          rx="6"
+          fill="#FFF"
+          stroke="#000"
+          strokeWidth="1.5"
+        />
+
+        {/* Tooltip Main Value */}
+        <SvgText
+          x={textCenterX}
+          y={tooltipY + 18}
+          fontSize="13"
+          fontWeight="bold"
+          fill="#000"
+          textAnchor="middle"
+        >
+          {point.value} kg
+        </SvgText>
+
+        {/* Tooltip Sub-label (Date) */}
+        <SvgText
+          x={textCenterX}
+          y={tooltipY + 34}
+          fontSize="12"
+          fill="#777"
+          textAnchor="middle"
+        >
+          {xAxisLabels[Math.round((selectedIndex / (data.length - 1)) * (xAxisLabels.length - 1))] || ''}
+        </SvgText>
+
+        {/* Point Highlight Ring */}
+        <Circle
+          cx={point.x}
+          cy={point.y}
+          r="4.5"
+          fill="#FFF"
+          stroke="#000"
+          strokeWidth="2.5"
+        />
+      </G>
     );
   };
 
   return (
-    <Pressable style={styles.container} onPress={handleOutsidePress}>
-      <View style={styles.yAxis}>
-        {yAxisLabels.map((label, index) => (
-          <Text key={index} style={styles.axisText}>
-            {label}
-          </Text>
+    <View style={{ width, height }}>
+      <Svg width={width} height={height}>
+        {/* Y-Axis Labels */}
+        {yAxisLabels.map((val, i) => {
+          const yPos = padding.top + (i / 2) * chartHeight;
+          return (
+            <React.Fragment key={`y-${val}`}>
+              <SvgText
+                x={padding.left - 10}
+                y={yPos + 5}
+                fontSize="14"
+                fill="#666"
+                textAnchor="end"
+              >
+                {val}
+              </SvgText>
+              {i === 2 && (
+                <Line
+                  x1={padding.left}
+                  y1={yPos}
+                  x2={width - padding.right}
+                  y2={yPos}
+                  stroke="#E0E0E0"
+                  strokeWidth="1"
+                />
+              )}
+            </React.Fragment>
+          );
+        })}
+
+        {/* Smooth Line Path */}
+        <Path 
+          d={path} 
+          fill="none" 
+          stroke="#007AFF" 
+          strokeWidth="2" 
+        />
+
+        {/* Optional Data Points (Dots) */}
+        {showDots && points.map((point, i) => (
+          <Circle
+            key={`dot-${i}`}
+            cx={point.x}
+            cy={point.y}
+            r="4"
+            fill="#007AFF"
+            stroke="#FFF"
+            strokeWidth="2"
+          />
         ))}
-      </View>
 
-      <View style={styles.chartWrapper}>
-        <View
-          style={styles.chartArea}
-          onLayout={(e) => setDimensions(e.nativeEvent.layout)}
-        >
-          <View style={[styles.gridLine, { top: dimensions.height }]} />
+        {/* Call tooltip render function */}
+        {renderTooltip()}
 
-          {renderVerticalLine()}
-          {renderLines()}
-          {renderDots()}
-          {renderTooltip()}
-        </View>
+        {/* Invisible vertical columns for perfect tap detection without overlap */}
+        {points.map((point, i) => (
+          <Rect
+            key={`touch-${i}`}
+            x={point.x - (segmentWidth / 2)}
+            y={0}
+            width={segmentWidth}
+            height={height}
+            fill="transparent"
+            onPress={() => setSelectedIndex(selectedIndex === i ? null : i)}
+          />
+        ))}
 
-        <View style={styles.xAxis}>
-          {xAxis.map((label, index) => (
-            <Text key={index} style={styles.axisText}>
+        {/* X-Axis Labels */}
+        {xAxisLabels.map((label, i) => {
+          const xPos = padding.left + (i / (xAxisLabels.length - 1)) * chartWidth;
+          return (
+            <SvgText
+              key={`x-${label}`}
+              x={xPos}
+              y={height - 10}
+              fontSize="14"
+              fill="#666"
+              textAnchor="middle"
+            >
               {label}
-            </Text>
-          ))}
-        </View>
-      </View>
-    </Pressable>
+            </SvgText>
+          );
+        })}
+      </Svg>
+    </View>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    height: 250,
-    padding: 20,
-    backgroundColor: '#fff',
-  },
-  yAxis: {
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    paddingRight: 15,
-    paddingBottom: 30,
-  },
-  chartWrapper: {
-    flex: 1,
-  },
-  chartArea: {
-    flex: 1,
-    position: 'relative',
-  },
-  xAxis: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: 15,
-  },
-  axisText: {
-    color: '#6c757d',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  lineSegment: {
-    position: 'absolute',
-    height: 2,
-    backgroundColor: '#007AFF',
-    borderRadius: 1,
-  },
-  gridLine: {
-    position: 'absolute',
-    width: '100%',
-    height: 1,
-    backgroundColor: '#F0F0F0',
-  },
-  verticalLine: {
-    position: 'absolute',
-    width: 1,
-    backgroundColor: '#000',
-    zIndex: 1,
-  },
-  tooltipContainer: {
-    position: 'absolute',
-    width: 100,
-    alignItems: 'center',
-    zIndex: 20,
-  },
-  tooltipBox: {
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#000',
-    borderRadius: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  tooltipValue: {
-    fontWeight: 'bold',
-    color: '#000',
-    fontSize: 14,
-  },
-  tooltipDate: {
-    color: '#6c757d',
-    fontSize: 12,
-    marginTop: 2,
-  }
-});
-
-export default LineChart;
+export default SmoothLineChart;
