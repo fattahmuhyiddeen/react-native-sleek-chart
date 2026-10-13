@@ -1,6 +1,6 @@
 {
   "name": "react-native-sleek-chart",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A sleek chart component for React Native",
   "main": "index.js",
   "scripts": {
